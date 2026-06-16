@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Pit Stop 체험 — F1</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;700&display=swap');
+@font-face{font-family:'Futura';src:local('Futura'),local('Futura-Medium');}
+:root{
+  --fen:'Futura','Trebuchet MS',Arial,sans-serif;
+  --fkr:'IBM Plex Sans KR','Apple SD Gothic Neo',sans-serif;
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
+html,body{width:100%;height:100%;overflow:hidden;background:#000;cursor:default;}
+
+#bg{
+  position:fixed;inset:0;
+  background:url('Pit/road.png') center/cover no-repeat;
+  z-index:0;
+}
+#bg::after{ content:'';position:absolute;inset:0;background:rgba(0,0,0,.30); }
+
+#back{
+  position:fixed;top:26px;left:32px;z-index:9999;
+  width:46px;height:46px;background:none;border:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  opacity:.85;transition:opacity .25s,transform .25s;
+}
+#back:hover{opacity:1;transform:translateX(-4px);}
+#back::before{
+  content:'';width:0;height:0;
+  border-top:12px solid transparent;border-bottom:12px solid transparent;
+  border-right:19px solid #fff;
+  filter:drop-shadow(0 2px 4px rgba(0,0,0,.6));
+}
+
+#hud{
+  position:fixed;top:0;left:0;width:100%;
+  display:flex;flex-direction:column;align-items:center;
+  padding-top:22px;z-index:50;pointer-events:none;
+}
+#timer{
+  font-family:var(--fen);font-weight:700;
+  font-size:clamp(48px,7vw,104px);
+  color:#fff;letter-spacing:.02em;
+  font-variant-numeric:tabular-nums;
+  text-shadow:0 4px 30px rgba(0,0,0,.85);line-height:1;
+}
+#timer.done{ color:#33d17a; }
+#hint{
+  margin-top:14px;font-family:var(--fkr);font-weight:400;
+  font-size:clamp(14px,1.3vw,19px);color:#fff;
+  text-shadow:0 2px 12px rgba(0,0,0,.9);min-height:1.4em;
+}
+#best{
+  margin-top:6px;font-family:var(--fen);font-weight:700;
+  font-size:13px;letter-spacing:.14em;text-transform:uppercase;
+  color:rgba(255,255,255,.7);text-shadow:0 2px 10px rgba(0,0,0,.9);
+}
+
+#stage{ position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center; }
+
+/* 차량 컨테이너: 가로 차체(2072x948 비율) */
+#car-wrap{
+  position:relative;
+  width:min(94vw,1280px);
+  aspect-ratio:2072 / 948;
+}
+
+/* 풀프레임 레이어(차체 + 바퀴) 공통 — 좌표가 이미지에 박혀 있어 정렬이 자동으로 맞음 */
+.layer{
+  position:absolute;inset:0;
+  width:100%;height:100%;
+  object-fit:contain;
+  pointer-events:none;user-select:none;-webkit-user-drag:none;
+}
+#car-base{
+  z-index:1;
+  filter:drop-shadow(0 14px 26px rgba(0,0,0,.55));
+}
+.wheel{
+  z-index:2;
+  transition:transform .5s cubic-bezier(.16,1,.3,1), opacity .45s ease;
+}
+/* 빠진(off) 상태: 위쪽 바퀴는 위로, 아래쪽 바퀴는 아래로 슬라이드 + 페이드 */
+.wheel.off.top   { transform:translateY(-24%); opacity:0; }
+.wheel.off.bottom{ transform:translateY( 24%); opacity:0; }
+
+/* 클릭 핫스팟 — 실제 타이어 위치에만 배치(레이어는 pointer-events 없음) */
+.hot{
+  position:absolute;
+  width:17%;aspect-ratio:1/1.3;
+  transform:translate(-50%,-50%);
+  border-radius:50%;
+  z-index:5;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+}
+
+#restart{
+  position:fixed;bottom:30px;left:50%;transform:translateX(-50%);
+  z-index:60;font-family:var(--fen);font-weight:700;
+  font-size:14px;letter-spacing:.1em;text-transform:uppercase;
+  color:#fff;background:rgba(0,0,0,.55);
+  border:1px solid rgba(255,255,255,.4);
+  padding:13px 26px;border-radius:50px;cursor:pointer;
+  opacity:0;pointer-events:none;transition:opacity .35s, background .25s;
+}
+#restart.show{ opacity:1;pointer-events:auto; }
+#restart:hover{ background:rgba(0,0,0,.75); }
+
+@media (prefers-reduced-motion: reduce){ *{transition-duration:.01ms!important;} }
+</style>
+</head>
+<body>
+
+<div id="bg"></div>
+<button id="back" onclick="goBack()" aria-label="back"></button>
+
+<div id="hud">
+  <div id="timer">0.000</div>
+  <div id="hint">헌 타이어를 클릭해 피트스탑을 시작하세요</div>
+  <div id="best"></div>
+</div>
+
+<div id="stage">
+  <div id="car-wrap">
+    <img id="car-base" class="layer" src="Pit/car_body.png" alt="McLaren" draggable="false"/>
+    <!-- 바퀴 4개: 각 이미지에 위치가 박혀 있어 풀프레임으로 겹치기만 하면 정렬됨 -->
+    <img class="layer wheel top"    data-i="0" src="Pit/wheel_RL.png" alt="" draggable="false"/>
+    <img class="layer wheel bottom" data-i="1" src="Pit/wheel_RR.png" alt="" draggable="false"/>
+    <img class="layer wheel top"    data-i="2" src="Pit/wheel_FL.png" alt="" draggable="false"/>
+    <img class="layer wheel bottom" data-i="3" src="Pit/wheel_FR.png" alt="" draggable="false"/>
+    <!-- 클릭 핫스팟(타이어 중심 좌표 %) -->
+    <div class="hot" data-i="0" style="left:16.5%;top:14.0%;"></div>
+    <div class="hot" data-i="1" style="left:16.4%;top:85.8%;"></div>
+    <div class="hot" data-i="2" style="left:77.2%;top:14.0%;"></div>
+    <div class="hot" data-i="3" style="left:77.3%;top:85.8%;"></div>
+  </div>
+</div>
+
+<button id="restart" onclick="resetGame()">다시 하기 ↻</button>
+
+<script>
+const wheels = [...document.querySelectorAll('.wheel')];
+const hots   = [...document.querySelectorAll('.hot')];
+const timerEl= document.getElementById('timer');
+const hintEl = document.getElementById('hint');
+const bestEl = document.getElementById('best');
+const restartBtn = document.getElementById('restart');
+
+/* state[i] = {pos:'on'|'off'} — on=장착, off=탈거 */
+let state=[], phase='idle', t0=0, raf=0, best=null;
+try{ const b=localStorage.getItem('pit_best'); if(b) best=parseFloat(b); }catch(e){}
+
+function fmt(ms){ return (ms/1000).toFixed(3); }
+function showBest(){ bestEl.textContent = best!=null ? ('BEST  '+best.toFixed(3)+'s') : ''; }
+function tick(){ timerEl.textContent=fmt(performance.now()-t0); raf=requestAnimationFrame(tick); }
+function startTimer(){ t0=performance.now(); timerEl.classList.remove('done'); cancelAnimationFrame(raf); raf=requestAnimationFrame(tick); }
+function stopTimer(){
+  cancelAnimationFrame(raf);
+  const el=performance.now()-t0; timerEl.textContent=fmt(el); timerEl.classList.add('done');
+  const s=el/1000; if(best==null||s<best){best=s;try{localStorage.setItem('pit_best',String(s));}catch(e){}}
+  showBest();
+}
+
+function render(){
+  state.forEach((s,i)=>{
+    wheels[i].classList.toggle('off', s.pos==='off');
+  });
+}
+
+function initState(){
+  state = wheels.map(()=>({pos:'on'}));
+  phase='idle';
+  timerEl.textContent='0.000'; timerEl.classList.remove('done');
+  hintEl.textContent='헌 타이어를 클릭해 피트스탑을 시작하세요';
+  restartBtn.classList.remove('show');
+  render();
+}
+
+function onClick(i){
+  const s=state[i];
+
+  /* 완료 후 아무 타이어나 누르면 재시작하며 그 클릭을 첫 탈거로 이어줌 */
+  if(phase==='done'){ initState(); onClick(i); return; }
+
+  /* 첫 클릭 → 타이머 시작 + 탈거 단계 진입 */
+  if(phase==='idle'){ phase='removing'; startTimer(); hintEl.textContent='헌 타이어 4개를 모두 빼세요'; }
+
+  /* 탈거 단계: 장착된 타이어를 클릭하면 탈거 */
+  if(phase==='removing' && s.pos==='on'){
+    s.pos='off'; render();
+    if(state.every(t=>t.pos==='off')){ phase='mounting'; hintEl.textContent='새 타이어 4개를 클릭해 장착하세요'; }
+    return;
+  }
+
+  /* 장착 단계: 빈 자리를 클릭하면 새 타이어 장착 */
+  if(phase==='mounting' && s.pos==='off'){
+    s.pos='on'; render();
+    if(state.every(t=>t.pos==='on')){
+      phase='done'; stopTimer();
+      hintEl.textContent='피트스탑 완료! 다시 하려면 타이어를 클릭하세요';
+      restartBtn.classList.add('show');
+    }
+    return;
+  }
+}
+
+hots.forEach(h=> h.addEventListener('click', ()=>onClick(parseInt(h.dataset.i))) );
+
+function resetGame(){ initState(); }
+function goBack(){ history.length>1 ? history.back() : location.href='index.html'; }
+window.addEventListener('keydown',e=>{ if(e.key==='Escape') goBack(); });
+
+showBest();
+initState();
+</script>
+</body>
+</html>
